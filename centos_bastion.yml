@@ -1,0 +1,170 @@
+heat_template_version: 2013-05-23
+
+description: >
+  Demo script for Nebula Oy
+  
+parameters:
+  key_name:
+    type: string
+    label: Key name
+    default: mceith_nbl
+    description: Name of key-pair to be used for compute instance
+  instance_type:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: nbl-n1-small
+  image_id:
+    type: string
+    label: Image ID
+    description: Image to be used for compute instance
+    default: Windows Server 2012 R2 Std (64-bit)
+  floating_network:
+    type: string
+    label: Public network UUID
+    description: UUID of the public network
+    default: 58499f3f-208f-4448-9c2f-68b3393a7537
+   
+resources:
+  dmz:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: dmz
+  dmz_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: dmz-subnet
+      cidr: 10.0.0.0/24
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      enable_dhcp: true
+      gateway_ip: 10.0.0.1
+      host_routes:
+       - {destination: 10.0.2.0/24, nexthop: 10.0.0.254}
+      network_id: { get_resource: dmz }
+
+  dmz_router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: true
+      name: dmz-router
+      external_gateway_info: {"network": Public-Helsinki-2 }
+  dmz_router_int0:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: dmz_router }
+      subnet_id: { get_resource: dmz_subnet }
+      
+  lan_router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: true
+      name: lan-router
+  lan_router_int0:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: lan_router }
+      subnet_id: { get_resource: lan1_subnet }
+  lan_router_int1:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: lan_router }
+      port_id:  { get_resource: lan1_router_port1 }
+  lan1_router_port1:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: dmz }
+      fixed_ips:
+        - ip_address: 10.0.0.254
+
+  lan1:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: lan1
+  lan1_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: lan1-subnet
+      cidr: 10.0.2.0/24
+      gateway_ip: 10.0.2.1
+      allocation_pools: [{"start": 10.0.2.100, "end": 10.0.2.200}]
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      enable_dhcp: true
+      network_id: { get_resource: lan1 }
+      
+  dmzin_0:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description : dmz inbound rules
+      name: dmz-in
+      rules: [{"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}]
+
+  lan1in_0:
+     type: OS::Neutron::SecurityGroup
+     properties:
+      description : lan1 inbound rules
+      name: lan1-in
+      rules: [{"direction": ingress, "remote_ip_prefix": 10.0.0.10/24, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 0.0.0.10/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}]
+
+  instance0_port0:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: dmz }
+      security_groups: [{ get_resource: dmzin_0 }]
+      fixed_ips :
+         - ip_address: 10.0.0.10
+  instance0_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      port_id: { get_resource: instance0_port0 }
+      floating_network_id: { get_param: floating_network }
+
+  instance1_port0:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: lan1 }
+      security_groups: [{ get_resource:  lan1in_0 }]
+
+  instance2_port0:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: lan1 }
+      security_groups: [{ get_resource:  lan1in_0 }]
+
+  instance0:
+    type: OS::Nova::Server
+    properties:
+      availability_zone : helsinki-2
+      name: bastion-host
+      image: { get_param: image_id }
+      flavor: { get_param: instance_type }
+      key_name: { get_param: key_name }
+      networks:
+         -  port: { get_resource:  instance0_port0 }
+
+  instance1:
+    type: OS::Nova::Server
+    properties:
+      availability_zone : helsinki-2
+      name: lan-host1
+      image: { get_param: image_id }
+      flavor: { get_param: instance_type }
+      key_name: { get_param: key_name }
+      networks:
+         -  port: { get_resource:  instance1_port0 }
+         
+  instance2:
+    type: OS::Nova::Server
+    properties:
+      availability_zone : helsinki-2
+      name: lan-host2
+      image: { get_param: image_id }
+      flavor: { get_param: instance_type }
+      key_name: { get_param: key_name }
+      networks:
+         -  port: { get_resource:  instance2_port0 }
