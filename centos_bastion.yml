@@ -24,7 +24,17 @@ parameters:
     label: Public network UUID
     description: UUID of the public network
     default: 58499f3f-208f-4448-9c2f-68b3393a7537
-   
+  availability_zone_name:
+    type: string
+    label: Availability zone
+    description: Name of the Availability zone
+    default: helsinki-2
+  external_network:
+    type: string
+    label: External network 
+    description: External network for router interface
+    default: Public-Helsinki-2
+    
 resources:
   dmz:
     type: OS::Neutron::Net
@@ -48,7 +58,7 @@ resources:
     properties:
       admin_state_up: true
       name: dmz-router
-      external_gateway_info: {"network": Public-Helsinki-2 }
+      external_gateway_info: {"network": { get_param: external_network } }
   dmz_router_int0:
     type: OS::Neutron::RouterInterface
     properties:
@@ -107,7 +117,31 @@ resources:
       description : lan1 inbound rules
       name: lan1-in
       rules: [{"direction": ingress, "remote_ip_prefix": 10.0.0.10/24, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 0.0.0.10/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}]
+      
+  cpu_alarm_high:
+    type: OS::Ceilometer::Alarm
+    properties:
+      description: Scale-up if the average CPU > 50% for 1 minute
+      meter_name: cpu_util
+      statistic: avg
+      period: 60
+      evaluation_periods: 1
+      threshold: 50
+      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}}
+      comparison_operator: gt
 
+  cpu_alarm_low:
+    type: OS::Ceilometer::Alarm
+    properties:
+      description: Scale-down if the average CPU < 15% for 10 minutes
+      meter_name: cpu_util
+      statistic: avg
+      period: 60
+      evaluation_periods: 1
+      threshold: 15
+      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}}
+      comparison_operator: lt
+      
   instance0_port0:
     type: OS::Neutron::Port
     properties:
@@ -121,50 +155,50 @@ resources:
     properties:
       port_id: { get_resource: instance0_port0 }
       floating_network_id: { get_param: floating_network }
+  instance0:
+    type: OS::Nova::Server
+    properties:
+      availability_zone : { get_param: availability_zone_name }
+      name: bastion-host
+      image: { get_param: image_id }
+      flavor: { get_param: instance_type }
+      key_name: { get_param: key_name }
+      networks:
+         -  port: { get_resource: instance0_port0 }
+      metadata: {"metering.stack": {get_param: "OS::stack_id"}}
 
   instance1_port0:
     type: OS::Neutron::Port
     properties:
       admin_state_up: true
       network_id: { get_resource: lan1 }
-      security_groups: [{ get_resource:  lan1in_0 }]
-
-  instance2_port0:
-    type: OS::Neutron::Port
-    properties:
-      admin_state_up: true
-      network_id: { get_resource: lan1 }
-      security_groups: [{ get_resource:  lan1in_0 }]
-
-  instance0:
-    type: OS::Nova::Server
-    properties:
-      availability_zone : helsinki-2
-      name: bastion-host
-      image: { get_param: image_id }
-      flavor: { get_param: instance_type }
-      key_name: { get_param: key_name }
-      networks:
-         -  port: { get_resource:  instance0_port0 }
-
+      security_groups: [{ get_resource: lan1in_0 }]
   instance1:
     type: OS::Nova::Server
     properties:
-      availability_zone : helsinki-2
+      availability_zone : { get_param: availability_zone_name }
       name: lan-host1
       image: { get_param: image_id }
       flavor: { get_param: instance_type }
       key_name: { get_param: key_name }
       networks:
-         -  port: { get_resource:  instance1_port0 }
-         
+         -  port: { get_resource: instance1_port0 }
+      metadata: {"metering.stack": {get_param: "OS::stack_id"}}
+      
+  instance2_port0:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: lan1 }
+      security_groups: [{ get_resource: lan1in_0 }]
   instance2:
     type: OS::Nova::Server
     properties:
-      availability_zone : helsinki-2
+      availability_zone : { get_param: availability_zone_name }
       name: lan-host2
       image: { get_param: image_id }
       flavor: { get_param: instance_type }
       key_name: { get_param: key_name }
       networks:
-         -  port: { get_resource:  instance2_port0 }
+         -  port: { get_resource: instance2_port0 }
+      metadata: {"metering.stack": {get_param: "OS::stack_id"}}
