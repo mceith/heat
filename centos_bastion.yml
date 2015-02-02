@@ -7,7 +7,6 @@ parameters:
   key_name:
     type: string
     label: Key name
-    default: mceith_nbl
     description: Name of key-pair to be used for compute instance
   instance_type:
     type: string
