@@ -116,31 +116,7 @@ resources:
      properties:
       description : lan1 inbound rules
       name: lan1-in
-      rules: [{"direction": ingress, "remote_ip_prefix": 10.0.0.10/24, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 0.0.0.10/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}]
-      
-  cpu_alarm_high:
-    type: OS::Ceilometer::Alarm
-    properties:
-      description: Scale-up if the average CPU > 50% for 1 minute
-      meter_name: cpu_util
-      statistic: avg
-      period: 60
-      evaluation_periods: 1
-      threshold: 50
-      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}}
-      comparison_operator: gt
-
-  cpu_alarm_low:
-    type: OS::Ceilometer::Alarm
-    properties:
-      description: Scale-down if the average CPU < 15% for 10 minutes
-      meter_name: cpu_util
-      statistic: avg
-      period: 60
-      evaluation_periods: 1
-      threshold: 15
-      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}}
-      comparison_operator: lt
+      rules: [{"direction": ingress, "remote_ip_prefix": 10.0.0.10/24, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 10.0.0.10/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}]
       
   instance0_port0:
     type: OS::Neutron::Port
@@ -155,6 +131,21 @@ resources:
     properties:
       port_id: { get_resource: instance0_port0 }
       floating_network_id: { get_param: floating_network }
+      
+  instance1_port0:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: lan1 }
+      security_groups: [{ get_resource: lan1in_0 }]
+      
+  instance2_port0:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: lan1 }
+      security_groups: [{ get_resource: lan1in_0 }]
+
   instance0:
     type: OS::Nova::Server
     properties:
@@ -166,13 +157,10 @@ resources:
       networks:
          -  port: { get_resource: instance0_port0 }
       metadata: {"metering.stack": {get_param: "OS::stack_id"}}
+      user_data: |
+        #!/bin/bash -v
+        yum update -y
 
-  instance1_port0:
-    type: OS::Neutron::Port
-    properties:
-      admin_state_up: true
-      network_id: { get_resource: lan1 }
-      security_groups: [{ get_resource: lan1in_0 }]
   instance1:
     type: OS::Nova::Server
     properties:
@@ -184,13 +172,7 @@ resources:
       networks:
          -  port: { get_resource: instance1_port0 }
       metadata: {"metering.stack": {get_param: "OS::stack_id"}}
-      
-  instance2_port0:
-    type: OS::Neutron::Port
-    properties:
-      admin_state_up: true
-      network_id: { get_resource: lan1 }
-      security_groups: [{ get_resource: lan1in_0 }]
+
   instance2:
     type: OS::Nova::Server
     properties:
