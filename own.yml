@@ -1,0 +1,147 @@
+heat_template_version: 2013-05-23
+
+description: >
+  mceith.com
+  
+parameters:
+  key_name:
+    type: string
+    label: Key name
+    default: mceith_nbl
+    description: Name of key-pair to be used for compute instance
+  instance_flavor:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: nbl-n1-small
+    constraints:
+      - allowed_values: [ nbl-n1-small, nbl-n1-medium, nbl-n1-large ]
+        description: Value must be one of nbl-n1-small, nbl-n1-medium or nbl-n1-larg.
+  image_id:
+    type: string
+    label: Image ID
+    description: Image to be used for compute instance
+    default: CentOS 7 x86_64
+  floating_network:
+    type: string
+    label: Public network UUID
+    description: UUID of the public network
+    default: 58499f3f-208f-4448-9c2f-68b3393a7537
+  availability_zone_name:
+    type: string
+    label: Availability zone
+    description: Name of the Availability zone
+    default: helsinki-2
+  external_network:
+    type: string
+    label: External network 
+    description: External network for router interface
+    default: Public-Helsinki-2
+
+resources:
+  dmz:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: dmz-10.0.1.0/24
+  dmz_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: dmz-subnet
+      cidr: 10.0.1.0/24
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      enable_dhcp: true
+      gateway_ip: 10.0.1.1
+      host_routes:
+       - {destination: 169.254.169.254/32, nexthop: 10.0.1.1}
+      network_id: { get_resource: dmz }
+      
+  edge_router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: true
+      name: edge-router
+      external_gateway_info: {"network": { get_param: external_network } }
+  edge_router_int0:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: edge_router }
+      subnet_id: { get_resource: db_lan_subnet }
+  edge_router_int1:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: edge_router }
+      port_id: { get_resource: edge_router_port1 }
+  edge_router_port1:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: dmz }
+      fixed_ips:
+        - ip_address: 10.0.1.1
+  edge_router_int2:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: edge_router }
+      port_id: { get_resource: edge_router_port2 }
+  edge_router_port2:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: admin_lan }
+      fixed_ips:
+        - ip_address: 10.0.0.1
+  
+  db_lan:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: db-10.0.2.0/24
+  db_lan_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: db-subnet
+      cidr: 10.0.2.0/24
+      gateway_ip: 10.0.2.1
+      allocation_pools: [{"start": 10.0.2.100, "end": 10.0.2.200}]
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      enable_dhcp: true
+      network_id: { get_resource: db_lan }
+      
+  admin_lan:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: admin-10.0.0.0/24
+  admin_lan_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: admin-subnet
+      cidr: 10.0.0.0/24
+      gateway_ip: 10.0.0.1
+      allocation_pools: [{"start": 10.0.0.10, "end": 10.0.0.200}]
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      enable_dhcp: true
+      network_id: { get_resource: admin_lan }
+      
+  dmzin_0:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description : dmz inbound rules
+      name: dmz-in
+      rules: [{"direction": ingress, "remote_ip_prefix": 10.0.0.0/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 10.0.0.0/0, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 80, "ethertype": IPv4, "port_range_max":  80, "protocol":  tcp}]
+
+  db_lanin_0:
+     type: OS::Neutron::SecurityGroup
+     properties:
+      description : db_lan inbound rules
+      name: db_lan-in
+      rules: [{"direction": ingress, "remote_ip_prefix": 10.0.0.10/24, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 10.0.0.10/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 10.0.1.0/24, "port_range_min": 3306, "ethertype": IPv4, "port_range_max":  3306, "protocol":  tcp}]
+      
+  adminin_0:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description : admin inbound rules
+      name: admin-in
+      rules: [{"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp}, {"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp}]
+
