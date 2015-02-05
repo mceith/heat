@@ -1,0 +1,164 @@
+heat_template_version: 2013-05-23
+
+description: >
+  mceith.com servers
+  
+parameters:
+  key_name:
+    type: string
+    label: Key name
+    default: mceith_nbl
+    description: Name of key-pair to be used for compute instance
+  instance_flavor:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: nbl-n1-small
+    constraints:
+      - allowed_values: [ nbl-n1-small, nbl-n1-medium, nbl-n1-large ]
+        description: Value must be one of nbl-n1-small, nbl-n1-medium or nbl-n1-larg.
+  image_id:
+    type: string
+    label: Image ID
+    description: Image to be used for compute instance
+    default: CentOS 7 x86_64
+  floating_network:
+    type: string
+    label: Public network UUID
+    description: UUID of the public network
+    default: 58499f3f-208f-4448-9c2f-68b3393a7537
+  availability_zone_name:
+    type: string
+    label: Availability zone
+    description: Name of the Availability zone
+    default: helsinki-2
+  external_network:
+    type: string
+    label: External network 
+    description: External network for router interface
+    default: Public-Helsinki-2
+    constraints:
+      - allowed_values: [ Public-Helsinki-1, Public-Helsinki-2 ]
+        description: Value must be one of Public-Helsinki-1 or Public-Helsinki-2.
+  dmz_network_id:
+    type: string
+    description: The network for the VM
+  security_group_dmz:
+    type: string
+    description: dmz security groups
+    default: dmz-in
+  security_group_db:
+    type: string
+    description: db security groups
+    default: db_lan-in
+  db_network:
+    type: string
+    description: The network for the db 
+    default: db-10.0.2.0/24
+  database_name:
+    type: string
+    description: Name of the wordpress DB
+    default: wordpress
+  database_user:
+    type: string
+    description: Name of the wordpress user
+    default: wordpress
+
+    
+resources:
+
+  database_password:
+    type: OS::Heat::RandomString
+  database_root_password:
+    type: OS::Heat::RandomString
+    
+  fe1_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: dmz_network_id }
+      security_groups: [{ get_param: security_group_dmz }]
+  
+  fe1_floating_ip:
+    type: OS::Neutron::FloatingIP
+    depends_on: fe1_port
+    properties:
+      floating_network_id: { get_param: floating_network }
+      port_id: { get_resource: fe1_port }
+      
+  fe1:
+    type: OS::Nova::Server
+    depends_on: fe1_port
+    properties:
+      availability_zone : { get_param: availability_zone_name }
+      key_name: { get_param: key_name }
+      image: { get_param: image_id }
+      flavor: { get_param: instance_flavor }
+      networks:
+        - port: { get_resource: fe1_port }
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/bash -v
+            yum -y install epel-release
+            yum -y install httpd wordpress php php-mysql
+            systemctl enable httpd.service
+            systemctl start httpd.service
+            setsebool -P httpd_can_network_connect_db=1
+            	    
+            sed -i "/Deny from All/d" /etc/httpd/conf.d/wordpress.conf
+            sed -i "s/Require local/Require all granted/" /etc/httpd/conf.d/wordpress.conf
+            sed -i s/database_name_here/$db_name/ /etc/wordpress/wp-config.php
+            sed -i s/username_here/$db_user/ /etc/wordpress/wp-config.php
+            sed -i s/password_here/$db_password/ /etc/wordpress/wp-config.php
+            sed -i s/localhost/$db_host/ /etc/wordpress/wp-config.php
+            
+            systemctl restart httpd.service
+          params:
+            $db_name: {get_param: database_name}
+            $db_user: {get_param: database_user}
+            $db_password: {get_attr: [database_password, value]}
+            $db_host: {get_attr: [mariadb1, first_address]}
+            
+  mariadb1:
+    type: OS::Nova::Server
+    properties:
+      availability_zone : { get_param: availability_zone_name }
+      image: { get_param: image_id }
+      flavor: { get_param: instance_flavor }
+      key_name: { get_param: key_name }
+      networks:
+         -  network: { get_param: db_network }
+      security_groups: [{ get_param: security_group_db }]
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/bash -v
+            yum -y install mariadb mariadb-server
+            
+            systemctl enable mariadb.service
+            systemctl start mariadb.service
+            
+            mysqladmin -u root password $db_rootpassword
+            
+            cat << EOF | mysql -u root --password=$db_rootpassword
+            CREATE DATABASE $db_name;
+            GRANT ALL PRIVILEGES ON $db_name.* TO "$db_user"@"%"
+            IDENTIFIED BY "$db_password";
+            FLUSH PRIVILEGES;
+            EXIT
+            EOF
+          params:
+            $db_rootpassword: {get_attr: [database_root_password, value]}
+            $db_name: {get_param: database_name}
+            $db_user: {get_param: database_user}
+            $db_password: {get_attr: [database_password, value]}
+            
+outputs:
+  website_url:
+    value:
+      str_replace:
+        template: http://host/wordpress/
+        params:
+          host: { get_attr: [fe1_floating_ip, floating_ip_address] }
+      
+
