@@ -1,0 +1,125 @@
+heat_template_version: 2013-05-23
+
+description: >
+  MultiAZ network setup with routers. 
+  
+parameters:
+
+  external_network_hki1:
+    type: string
+    label: External network 
+    description: External network for router interface
+    default: Public-Helsinki-1
+  external_network_hki2:
+    type: string
+    label: External network 
+    description: External network for router interface
+    default: Public-Helsinki-2
+  multiaz_cidr:
+    type: string
+    label: External network 
+    description: Address pool of multiaz lan
+    default: 192.168.0.0/24
+
+resources:
+
+  dmz_hki1:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: dmz-hki1-10.0.1.0/24
+  dmz_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: dmz-hki1-subnet
+      cidr: 10.0.1.0/24
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      enable_dhcp: true
+      gateway_ip: 10.0.1.1
+      network_id: { get_resource: dmz_hki1 }
+
+  dmz_hki2:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: dmz-hki2-10.0.10.0/24
+  dmz_hki2_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: dmz-hki2-subnet
+      cidr: 10.0.10.0/24
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      enable_dhcp: true
+      gateway_ip: 10.0.10.1
+      network_id: { get_resource: dmz_hki2 }
+
+  multiaz_lan1:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: multiaz-lan-192.168.0.0/24
+  multiaz_lan1_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: multiaz-lan
+      cidr: { get_param: multiaz_cidr }
+      allocation_pools: [ {"end": 192.168.0.250, "start": 192.168.0.100 } ]
+      dns_nameservers: [217.30.180.230, 217.30.182.230]
+      gateway_ip: null
+      enable_dhcp: true
+      network_id: { get_resource: multiaz_lan1 }
+
+  edge_router_hki1:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: true
+      name: edge-router-hki1
+      external_gateway_info: {"network": { get_param: external_network_hki1 } }
+  edge_router_hki1_int1:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: edge_router_hki1 }
+      port_id: { get_resource: edge_router_hki1_port1 }
+  edge_router_hki1_port1:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: dmz_hki1 }
+      replacement_policy: AUTO
+      fixed_ips:
+        - ip_address: 10.0.1.1
+
+  edge_router_hki2:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: true
+      name: edge-router-hki2
+      external_gateway_info: {"network": { get_param: external_network_hki2 } }
+  edge_router_hki2_int1:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: edge_router_hki2 }
+      port_id: { get_resource: edge_router_hki2_port1 }
+  edge_router_hki2_port1:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: dmz_hki2 }
+      replacement_policy: AUTO
+      fixed_ips:
+        - ip_address: 10.0.10.1
+
+  dmz_hki1_in_0:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description : dmz inbound rules
+      name: dmz-in
+      rules: [ {"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 22, "ethertype": IPv4, "port_range_max":  22, "protocol":  tcp},
+               {"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 3389, "ethertype": IPv4, "port_range_max":  3389, "protocol":  tcp},
+               {"direction": ingress, "remote_ip_prefix": 192.168.0.0/24, "port_range_min": 3306, "ethertype": IPv4, "port_range_max":  3306, "protocol":  tcp},
+               {"direction": ingress, "remote_ip_prefix": 10.0.1.0/24, "port_range_min": 3306, "ethertype": IPv4, "port_range_max":  3306, "protocol":  tcp},
+               {"direction": ingress, "remote_ip_prefix": 0.0.0.0/0, "port_range_min": 80, "ethertype": IPv4, "port_range_max":  80, "protocol":  tcp}
+             ]
+
+
+
